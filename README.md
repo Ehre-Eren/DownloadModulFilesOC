@@ -12,7 +12,7 @@ A smart, interactive Python script to batch download all course documents (PDFs,
 2. **Starten:** Führe das Skript über das Terminal aus:
    ```bash
    python Download.py
-
+   ```
 
 
 3. **Login & Session:** Beim ersten Start (oder wenn deine Session abgelaufen ist) öffnet sich automatisch ein Browserfenster. Logge dich ganz normal mit deinen FOM-Zugangsdaten ein. Sobald das Dashboard geladen ist, speichert das Skript die Sitzung in einer `auth.json` ab und schließt das Fenster. Bei zukünftigen Starts läuft das Skript komplett unsichtbar im Hintergrund.
