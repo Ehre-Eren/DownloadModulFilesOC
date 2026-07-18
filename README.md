@@ -13,7 +13,7 @@ A smart, interactive Python script to batch download all course documents (PDFs,
    ```bash
    python Download.py
 
-```
+
 
 3. **Login & Session:** Beim ersten Start (oder wenn deine Session abgelaufen ist) öffnet sich automatisch ein Browserfenster. Logge dich ganz normal mit deinen FOM-Zugangsdaten ein. Sobald das Dashboard geladen ist, speichert das Skript die Sitzung in einer `auth.json` ab und schließt das Fenster. Bei zukünftigen Starts läuft das Skript komplett unsichtbar im Hintergrund.
 4. **Kurs auswählen:** Das Skript listet dir alle verfügbaren Module sauber sortiert nach Semestern im Terminal auf. Tippe einfach die Nummer des gewünschten Kurses ein und drücke Enter, um den Download zu starten.
@@ -26,7 +26,7 @@ Werden vom Skript automatisch beim ersten Start geprüft und installiert. Manuel
 ```bash
 pip install playwright beautifulsoup4
 
-```
+
 
 ### Features
 
