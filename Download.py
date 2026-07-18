@@ -10,7 +10,6 @@ try:
 except ImportError:
     print("Dependencies missing. Installing 'requests' and 'beautifulsoup4'...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4", "requests"])
-    # Re-import after installation
     from bs4 import BeautifulSoup
     import requests
 
@@ -44,13 +43,15 @@ def download_campus_files():
             
         href = link_tag["href"]
         
-        # Parse filename from instancename and strip Moodle suffix
+        # Parse clean filename from instancename
         instance_span = link_tag.find("span", class_="instancename")
         if instance_span:
             link_text = instance_span.get_text(strip=True)
-            link_text = link_text.replace(" Datei", "").strip()
         else:
             link_text = link_tag.get_text(strip=True)
+            
+        # Clean hidden Moodle text fragments
+        link_text = re.sub(r'(Datei|Aktivität|Resource)$', '', link_text, flags=re.IGNORECASE).strip()
 
         # Detect file extension using the Moodle icon
         img_tag = item.find("img", class_="activityicon")
@@ -74,29 +75,32 @@ def download_campus_files():
             clean_filename += extension
 
         file_path = os.path.join(DOWNLOAD_DIR, clean_filename)
-        print(f"Downloading: {clean_filename} ...")
         
         try:
-            # Add session cookie here if Moodle requires authentication
+            # UNCOMMENT AND PASTE YOUR COOKIE HERE
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 # "Cookie": "MoodleSession=YOUR_COOKIE_HERE" 
             }
             
-            response = requests.get(href, headers=headers, stream=True)
+            # Use allow_redirects=False to catch Moodle trying to redirect to the login page
+            response = requests.get(href, headers=headers, stream=True, allow_redirects=False)
             
             if response.status_code == 200:
+                print(f"Downloading: {clean_filename} ...")
                 with open(file_path, "wb") as file:
                     for chunk in response.iter_content(chunk_size=8192):
                         file.write(chunk)
                 download_count += 1
+            elif response.status_code in [302, 303]:
+                print(f" -> Skipped: {clean_filename} (Auth failed, redirected to login. Check your Cookie string!)")
             else:
-                print(f" -> HTTP Error {response.status_code} (Cookie expired?)")
+                print(f" -> HTTP Error {response.status_code} for {clean_filename}")
                 
         except Exception as e:
             print(f" -> Error downloading {clean_filename}: {e}")
 
-    print(f"\nDone. {download_count} files downloaded.")
+    print(f"\nDone. {download_count} files successfully downloaded.")
 
 if __name__ == "__main__":
     download_campus_files()
