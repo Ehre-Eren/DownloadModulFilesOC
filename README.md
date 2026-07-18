@@ -25,7 +25,7 @@ Werden vom Skript automatisch beim ersten Start geprüft und installiert. Manuel
 
 ```bash
 pip install playwright beautifulsoup4
-
+```
 
 
 ### Features
@@ -43,11 +43,10 @@ pip install playwright beautifulsoup4
 
 1. **Setup:** Place `Download.py` in your preferred study directory.
 2. **Run:** Execute the script via your terminal:
+
 ```bash
 python Download.py
-
 ```
-
 
 3. **Login & Session:** On the first run (or if your session expires), a browser window will automatically open. Log in using your FOM credentials. Once the dashboard loads, the script saves your session into an `auth.json` file and closes the browser. On subsequent runs, the script operates completely invisibly in headless mode.
 4. **Select Course:** The script lists all available modules in the terminal, cleanly sorted by semester. Simply type the number of the course you want and press Enter to start downloading all files.
@@ -59,7 +58,6 @@ Automatically handled by the script on the first run. Manual install:
 
 ```bash
 pip install playwright beautifulsoup4
-
 ```
 
 ### Features
