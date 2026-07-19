@@ -1,19 +1,18 @@
 import os
 import re
 import sys
-import subprocess
 
+# Validate dependencies strictly at startup before running application flow
 try:
     from playwright.sync_api import sync_playwright
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from bs4 import BeautifulSoup
 except ImportError:
-    print("Dependencies missing. Installing required packages...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright", "beautifulsoup4"])
-    subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-    from playwright.sync_api import sync_playwright
-    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-    from bs4 import BeautifulSoup
+    print("\n[!] Error: Missing required dependencies.")
+    print("Please install them manually using your terminal environment:")
+    print(f"    {sys.executable} -m pip install playwright beautifulsoup4")
+    print(f"    {sys.executable} -m playwright install chromium\n")
+    sys.exit(1)
 
 CAMPUS_URL = "https://oc-digital.de/node/6100"
 AUTH_FILE = "auth.json"
@@ -87,7 +86,7 @@ def get_available_courses(page):
     """)
     return extracted_data
 
-def download_course_contents(target_page):
+def download_course_contents(target_page, semester, course_name):
     print("Waiting for Moodle course contents to load...")
     # Allow up to 25 seconds for Moodle to finish generating the DOM tree
     target_page.wait_for_selector("li.modtype_resource", timeout=25000)
@@ -98,6 +97,14 @@ def download_course_contents(target_page):
     
     print(f"Resources found inside course: {len(resource_items)}")
     download_count = 0
+
+    # Prevent filename collisions across modules by scoping targets into subdirectories
+    clean_semester = re.sub(r'[\\/*?:"<>|]', "", semester).strip()
+    clean_course = re.sub(r'[\\/*?:"<>|]', "", course_name).strip()
+    target_dir = os.path.join(DOWNLOAD_DIR, clean_semester, clean_course)
+    
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
 
     for item in resource_items:
         link_tag = item.find("a", href=True)
@@ -129,11 +136,12 @@ def download_course_contents(target_page):
         if not clean_filename.lower().endswith(('.pdf', '.txt', '.docx', '.xlsx', '.py')):
             clean_filename += extension
 
-        file_path = os.path.join(DOWNLOAD_DIR, clean_filename)
+        file_path = os.path.join(target_dir, clean_filename)
         print(f"Downloading: {clean_filename} ...")
 
         try:
-            with target_page.expect_download(timeout=4000) as download_info:
+            # Extended timeout to 15 seconds to prevent premature failure on slow connections
+            with target_page.expect_download(timeout=15000) as download_info:
                 try:
                     target_page.goto(download_url, wait_until="commit")
                 except Exception:
@@ -143,13 +151,21 @@ def download_course_contents(target_page):
             download_count += 1
         except Exception:
             try:
-                page_text = target_page.locator("body").inner_text()
-                if "Aktivität" not in page_text and "Dashboard" not in page_text:
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(page_text)
-                    download_count += 1
-                else:
-                    print(f" -> Failed: {clean_filename}")
+                # Tightened verification logic before fallback saving raw response content
+                response = target_page.request.get(download_url)
+                content_type = response.headers.get("content-type", "").lower()
+                
+                if "text/plain" in content_type or "text/html" in content_type:
+                    page_text = target_page.locator("body").inner_text()
+                    lower_text = page_text.lower()
+                    
+                    # Validate against unexpected login or permission blocks
+                    if not any(x in lower_text for x in ["login", "anmeldung", "shibboleth", "error", "fehler"]):
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(page_text)
+                        download_count += 1
+                        continue
+                print(f" -> Failed: {clean_filename} (Invalid or protected server response layout)")
             except Exception as e:
                 print(f" -> Error: {clean_filename} ({e})")
 
@@ -178,7 +194,10 @@ def main():
             page.wait_for_selector("h3, .card, [class*='course']", timeout=5000)
         except PlaywrightTimeoutError:
             print("\n[!] Session expired or login needed. Opening browser window for authentication...")
+            page.close()
+            context.close()
             browser.close()
+            
             browser = p.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
             context = browser.new_context()
             page = context.new_page()
@@ -186,14 +205,28 @@ def main():
             
             print("[!] Keep the browser open until you see your course overview dashboard layout...\n")
             
-            while True:
+            # Bound the login checking loop to prevent infinite background execution hangs
+            max_wait_seconds = 300
+            wait_counter = 0
+            login_successful = False
+            
+            while wait_counter < max_wait_seconds:
                 try:
                     if page.locator("h3, .card, [class*='course']").count() > 2:
                         page.wait_for_timeout(2000)
+                        login_successful = True
                         break
                 except Exception:
                     pass
                 page.wait_for_timeout(1000)
+                wait_counter += 1
+                
+            if not login_successful:
+                print("[!] Error: Login timeout reached or browser window closed prematurely.")
+                page.close()
+                context.close()
+                browser.close()
+                return
                 
             context.storage_state(path=AUTH_FILE)
             print("Fresh session saved successfully.")
@@ -202,6 +235,8 @@ def main():
         
         if not courses:
             print("No courses detected. Check the browser window context layout view.")
+            page.close()
+            context.close()
             browser.close()
             return
 
@@ -231,7 +266,7 @@ def main():
                     if target_url and target_url.startswith("http"):
                         print("Navigating directly to extracted course link...")
                         page.goto(target_url)
-                        download_course_contents(page)
+                        download_course_contents(page, selected_course["semester"], selected_course["name"])
                     
                     # 2. Approach: Fallback to physical interaction if JS hides the URL
                     else:
@@ -242,13 +277,13 @@ def main():
                                 page.click(selected_course["selector"])
                             moodle_page = popup_info.value
                             print("Processing within new popup tab frame...")
-                            download_course_contents(moodle_page)
+                            download_course_contents(moodle_page, selected_course["semester"], selected_course["name"])
                             moodle_page.close()
                             
                         except PlaywrightTimeoutError:
                             # The click happened seamlessly in the current tab
                             print("Processing within current context frame...")
-                            download_course_contents(page)
+                            download_course_contents(page, selected_course["semester"], selected_course["name"])
                     
                     # Finally, reset the viewport back to the dashboard for your next command
                     page.goto(CAMPUS_URL)
@@ -259,8 +294,16 @@ def main():
                 print("Please enter a valid number or 'q'.")
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
-                print("Attempting to recover browser state...")
+                print("Attempting to recover browser state securely...")
                 try:
+                    # Cleanly close old connections before instantiating new fallback environments
+                    try:
+                        page.close()
+                        context.close()
+                        browser.close()
+                    except Exception:
+                        pass
+                        
                     browser = p.chromium.launch(headless=is_headless, args=["--disable-blink-features=AutomationControlled"])
                     context = browser.new_context(storage_state=AUTH_FILE if os.path.exists(AUTH_FILE) else None)
                     page = context.new_page()
@@ -269,7 +312,12 @@ def main():
                     print("Critical environment crash. Please restart the script execution loop.")
                     break
 
-        browser.close()
+        try:
+            page.close()
+            context.close()
+            browser.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()
