@@ -6,12 +6,14 @@ import subprocess
 try:
     from playwright.sync_api import sync_playwright
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from bs4 import BeautifulSoup
 except ImportError:
-    print("Dependencies missing. Installing 'playwright'...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
+    print("Dependencies missing. Installing required packages...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright", "beautifulsoup4"])
     subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
     from playwright.sync_api import sync_playwright
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from bs4 import BeautifulSoup
 
 CAMPUS_URL = "https://oc-digital.de/node/6100"
 AUTH_FILE = "auth.json"
@@ -20,7 +22,7 @@ DOWNLOAD_DIR = "downloads"
 def get_available_courses(page):
     print("Scanning Online-Campus for module cards...")
     page.wait_for_load_state("networkidle")
-    page.wait_for_selector("h3, .card, [class*='course']", timeout=10000)
+    page.wait_for_selector("h3, .card, [class*='course']", timeout=100000)
     
     extracted_data = page.evaluate("""
         () => {
@@ -90,7 +92,6 @@ def download_course_contents(target_page):
     # Allow up to 25 seconds for Moodle to finish generating the DOM tree
     target_page.wait_for_selector("li.modtype_resource", timeout=25000)
     
-    from bs4 import BeautifulSoup
     html_content = target_page.content()
     soup = BeautifulSoup(html_content, "html.parser")
     resource_items = soup.find_all("li", class_=lambda c: c and "modtype_resource" in c)
@@ -160,8 +161,12 @@ def main():
 
     with sync_playwright() as p:
         has_auth = os.path.exists(AUTH_FILE)
+        is_headless = True if has_auth else False
         
-        browser = p.chromium.launch(headless=has_auth)
+        browser = p.chromium.launch(
+            headless=is_headless, 
+            args=["--disable-blink-features=AutomationControlled"]
+        )
         context_args = {"storage_state": AUTH_FILE} if has_auth else {}
         context = browser.new_context(**context_args)
         page = context.new_page()
@@ -169,17 +174,27 @@ def main():
         print("Navigating to Online-Campus Portal...")
         page.goto(CAMPUS_URL)
 
-        if "node/6100" not in page.url:
+        try:
+            page.wait_for_selector("h3, .card, [class*='course']", timeout=5000)
+        except PlaywrightTimeoutError:
             print("\n[!] Session expired or login needed. Opening browser window for authentication...")
             browser.close()
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
             context = browser.new_context()
             page = context.new_page()
             page.goto(CAMPUS_URL)
             
-            print("[!] Keep the browser open until you reach your dashboard overview page...\n")
-            while "node/6100" not in page.url:
+            print("[!] Keep the browser open until you see your course overview dashboard layout...\n")
+            
+            while True:
+                try:
+                    if page.locator("h3, .card, [class*='course']").count() > 2:
+                        page.wait_for_timeout(2000)
+                        break
+                except Exception:
+                    pass
                 page.wait_for_timeout(1000)
+                
             context.storage_state(path=AUTH_FILE)
             print("Fresh session saved successfully.")
 
@@ -244,8 +259,15 @@ def main():
                 print("Please enter a valid number or 'q'.")
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
-                # Reset page state if a hard crash happens
-                page.goto(CAMPUS_URL)
+                print("Attempting to recover browser state...")
+                try:
+                    browser = p.chromium.launch(headless=is_headless, args=["--disable-blink-features=AutomationControlled"])
+                    context = browser.new_context(storage_state=AUTH_FILE if os.path.exists(AUTH_FILE) else None)
+                    page = context.new_page()
+                    page.goto(CAMPUS_URL)
+                except Exception:
+                    print("Critical environment crash. Please restart the script execution loop.")
+                    break
 
         browser.close()
 
