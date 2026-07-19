@@ -156,15 +156,17 @@ def download_course_contents(target_page, semester, course_name):
                 # Tightened verification logic before fallback saving raw response content
                 response = target_page.request.get(download_url)
                 content_type = response.headers.get("content-type", "").lower()
-                
-                if "text/plain" in content_type or "text/html" in content_type:
-                    page_text = target_page.locator("body").inner_text()
-                    lower_text = page_text.lower()
-                    
+
+                if response.ok and ("text/plain" in content_type or "text/html" in content_type):
+                    body_text = response.text()
+                    lower_text = body_text.lower()
+
                     # Validate against unexpected login or permission blocks
                     if not any(x in lower_text for x in ["login", "anmeldung", "shibboleth", "error", "fehler"]):
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(page_text)
+                        fallback_ext = ".txt" if "text/plain" in content_type else ".html"
+                        fallback_path = os.path.splitext(file_path)[0] + fallback_ext
+                        with open(fallback_path, "w", encoding="utf-8") as f:
+                            f.write(body_text)
                         download_count += 1
                         continue
                 print(f" -> Failed: {clean_filename} (Invalid or protected server response layout)")
