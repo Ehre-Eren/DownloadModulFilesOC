@@ -99,12 +99,14 @@ def download_course_contents(target_page, semester, course_name):
     download_count = 0
 
     # Prevent filename collisions across modules by scoping targets into subdirectories
-    clean_semester = re.sub(r'[\\/*?:"<>|]', "", semester).strip()
-    clean_course = re.sub(r'[\\/*?:"<>|]', "", course_name).strip()
+    def _safe_segment(value: str, default: str) -> str:
+        cleaned = re.sub(r'[\\/*?:"<>|]', "", value).strip()
+        return default if cleaned in {"", ".", ".."} else cleaned
+
+    clean_semester = _safe_segment(semester, "unknown-semester")
+    clean_course = _safe_segment(course_name, "unknown-course")
     target_dir = os.path.join(DOWNLOAD_DIR, clean_semester, clean_course)
-    
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
+    os.makedirs(target_dir, exist_ok=True)
 
     for item in resource_items:
         link_tag = item.find("a", href=True)
